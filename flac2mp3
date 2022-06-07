@@ -1,0 +1,70 @@
+#!/bin/sh
+
+function conv {
+	if [ -z "$1" -o ! -f "$1" ]; then
+		break;
+	fi
+	TAGS="/tmp/ex"
+	COVER="/tmp/c.jpg"
+	FLAC=$1
+	fields='COVER TITLE ALBUM TRACKNUMBER ARTIST GENRE YEAR'
+	metaflac --export-tags-to="$TAGS" --export-picture-to="$COVER" "$FLAC"
+
+	shnconv -o wav -O always -q "$FLAC"
+	FLAC=`echo $FLAC | sed -r 's/\.flac/\.wav/g'`
+	CONV_FILE=`echo $FLAC | sed -r 's/\.wav/\.mp3/g'`
+	KEYS="/usr/bin/lame -S -q 1 -b 320 --cbr --id3v2-only"
+
+	for field in $fields; do
+		value=""
+		if [ $field = 'COVER' -a -n "$COVER" ]; then
+			value=$COVER
+		else 
+			value="grep \"${field}\" \"${TAGS}\" | sed -e 's/${field}=\(.*\)/\1/g'"
+			value=`eval $value`
+		fi
+		if [ -n "$value" ]; then
+			case $field in
+			TITLE)
+				KEYS=$KEYS`printf ' --tt "%s"' "${value}"`
+				;;
+			COVER)
+				KEYS=$KEYS`printf ' --tl "%s"' "${value}"`
+				;;
+			ALBUM)
+				KEYS=$KEYS`printf ' --tl "%s"' "${value}"`
+				;;
+			ARTIST)
+				KEYS=$KEYS`printf ' --ta "%s"' "${value}"`
+				;;
+			YEAR)
+				KEYS=$KEYS`printf ' --ty "%s"' "${value}"`
+				;;
+			COMMENT)
+				KEYS=$KEYS`printf ' --tc "%s"' "${value}"`
+				;;
+			GENRE)
+				KEYS=$KEYS`printf ' --tg "%s"' "${value}"`
+				;;
+			TRACKNUMBER)
+				KEYS=$KEYS`printf ' --tn "%u"' "${value}"`
+				;;
+			esac
+		fi
+	done
+	eval ${KEYS} \"${FLAC}\" \"${CONV_FILE}\" && \
+	rm "$FLAC" && \
+	rm "$TAGS" && \
+	rm "$COVER"
+}
+
+
+if [ ! -z "$1" -a -f "$1" ]; then
+	conv "$1"	
+else
+	for f in *.flac;
+	do
+		conv "$f"
+	done
+fi
+exit 0

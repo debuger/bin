@@ -1,0 +1,134 @@
+#!/bin/sh
+
+usage()
+{
+  echo "usage: splitcue <cuefile> [file_to_split]"
+}
+
+if [ $# -lt 1 ]; then
+  usage
+  exit 1
+fi
+
+CUE_FILE=$1
+if [ -z $TMPDIR ]; then
+	TMPDIR="/tmp"
+fi
+NEW_CUE_FILE=$TMPDIR/list.cue
+
+if [ ! -f "$CUE_FILE" ]; then
+  usage
+  exit 1
+fi
+
+FROMCP=`file -b --mime-encoding "$CUE_FILE"`
+iconv -f "$FROMCP" -t UTF-8 "$CUE_FILE" > "$NEW_CUE_FILE" || cp -f "$CUE_FILE" "$NEW_CUE_FILE"
+
+FLAC_FILE=$2
+if [ ! -f "$FLAC_FILE" ]
+then
+    FLAC_FILE=`grep 'FILE' "$NEW_CUE_FILE" | grep -e '\([^"]*\.[^"]*\)' -o`
+fi
+if [ ! -r "$FLAC_FILE" ]; then
+  usage
+  exit 1
+fi
+
+COVERS="Cover.jpg cover.jpg Folder.jpg folder.jpg Front.jpg Covers/Front.jpg Covers/Front00.jpg Covers/Front01.jpg"
+for cover in $COVERS; do
+  if [ -r $cover ]; then
+    COVER=$cover;
+    break;
+  fi
+done
+
+shnsplit -O always -q -f "$NEW_CUE_FILE" -t "%n - %t" -o wav "$FLAC_FILE"
+
+fields='COVER TITLE ALBUM TRACKNUMBER ARTIST GENRE YEAR'
+
+GEN=`cueprint -t "%G" "$NEW_CUE_FILE"`
+if [ -z "$GEN"]; then
+	GEN=`grep "REM GENRE" "$NEW_CUE_FILE" | sed -e 's/REM GENRE \([[:print:]]*\).*/\1/g' | sed -e 's/^"\(.*\)"$/\1/g'`
+fi
+
+PERF=`cueprint -t "%P" -n 1 "$NEW_CUE_FILE"`
+if [ -z "$PERF" ]; then
+	PERF=`cueprint -t "%P" "$NEW_CUE_FILE"`	
+fi
+YEAR=`grep "REM DATE" "$NEW_CUE_FILE" | sed -e 's/REM DATE \([0-9]*\).*/\1/g'`
+
+cueconvert -i cue -o cue "$NEW_CUE_FILE" "$NEW_CUE_FILE"
+
+NUMBER=`cueprint -d "%N" "$NEW_CUE_FILE"`
+
+for((I=1;I<=NUMBER;I++));
+do
+	CONV_FILE=`printf "%02d - " $I``cueprint -n $I -t '%t' "$NEW_CUE_FILE"`".wav"
+	CONV_FILE=`echo "$CONV_FILE" | sed -r 's/\.\.wav/\.wav/g' | sed -r 's/\//-/g'`
+	
+	TITLE='%t'
+	ALBUM='%T'
+	ARTIST='%p'
+	COMMENT='%c'
+	GENRE='%g'
+	TRACKNUMBER='%n'
+	KEYS="/usr/bin/lame -S -q 1 -b 320 --cbr --id3v2-only"
+
+	for field in $fields; do
+		value=""
+		for conv in `eval echo \\$$field`; do
+			if [ $field = 'GENRE' -a -n "$GEN" ]; then
+			  	value=$GEN
+			  	break
+		  	elif [ $field = 'ARTIST' -a -n "$PERF" ]; then
+			  	value=$PERF
+			  	break
+			elif [ $field = 'YEAR' -a -n "$YEAR" ]; then
+				value=$YEAR
+				break
+			elif [ $field = 'COVER' -a -n "$COVER" ]; then
+				value=$COVER
+				break
+			else 
+				value=`cueprint -n $I -t "$conv\n" "$NEW_CUE_FILE"`
+				if [ -n "$value" ]; then
+					break
+				fi
+			fi
+		done
+		if [ -n "$value" ]; then
+			case $field in
+			TITLE)
+				KEYS=$KEYS`printf ' --tt "%s"' "${value}"`
+				;;
+			COVER)
+				KEYS=$KEYS`printf ' --tl "%s"' "${value}"`
+				;;
+			ALBUM)
+				KEYS=$KEYS`printf ' --tl "%s"' "${value}"`
+				;;
+			ARTIST)
+				KEYS=$KEYS`printf ' --ta "%s"' "${value}"`
+				;;
+			YEAR)
+				KEYS=$KEYS`printf ' --ty "%s"' "${value}"`
+				;;
+			COMMENT)
+				KEYS=$KEYS`printf ' --tc "%s"' "${value}"`
+				;;
+			GENRE)
+				KEYS=$KEYS`printf ' --tg "%s"' "${value}"`
+				;;
+			TRACKNUMBER)
+				KEYS=$KEYS`printf ' --tn "%u/%u"' "${value}" "${I}"`
+				;;
+			esac
+		fi
+	done
+	
+	CONV_FILE_N=`echo $CONV_FILE | sed -r 's/\.wav/\.mp3/g' | sed -r 's/[?<>\\:*|\"]/_/g'`
+	eval ${KEYS} \"${CONV_FILE}\" \"${CONV_FILE_N}\"
+	rm -f "$CONV_FILE"
+done
+rm -f "$NEW_CUE_FILE"
+exit 0

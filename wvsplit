@@ -1,0 +1,27 @@
+#!/bin/sh
+usage()
+{
+  echo "usage: wvsplit <wv> <m|f>"
+}
+
+if [ $# -lt 1 ]; then
+  usage
+  exit 1
+fi
+WV_FILE=$1
+if [ ! -f "${WV_FILE}" ]; then
+  usage
+  exit 1
+fi
+CUE_FILE="export.cue"
+COVER_FILE="Cover.jpg"
+if [ ! -z "$2" ] && [ "$2" == "m" ]; then
+	CONV="mp3splitcue  \"$CUE_FILE\" \"${WV_FILE}\""
+else
+	CONV="splitcue \"${CUE_FILE}\" \"${WV_FILE}\""
+fi
+wvunpack "${WV_FILE}" -q -y -t -xx "cuesheet=${CUE_FILE}" -xx "Cover Art (Front)=${COVER_FILE}" && \
+eval $CONV && \
+rm -f "`echo "${WV_FILE}" | sed -r 's/\.wv/\.wav/g'`"
+#rm -f "$CUE_FILE" && \
+exit 0

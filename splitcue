@@ -1,0 +1,119 @@
+#!/bin/sh
+
+usage()
+{
+  echo "usage: splitcue <cuefile> [file_to_split]"
+}
+
+if [ $# -lt 1 ]; then
+  usage
+  exit 1
+fi
+
+CUE_FILE=$1
+if [ -z $TMPDIR ]; then
+	TMPDIR="/tmp"
+fi
+NEW_CUE_FILE=$TMPDIR/list.cue
+
+if [ ! -f "$CUE_FILE" ]; then
+  usage
+  exit 1
+fi
+
+FROMCP=`file -b --mime-encoding "$CUE_FILE"`
+iconv -f "$FROMCP" -t UTF-8 "$CUE_FILE" > "$NEW_CUE_FILE" || cp -f "$CUE_FILE" "$NEW_CUE_FILE"
+
+FLAC_FILE=$2
+if [ ! -f "$FLAC_FILE" ]
+then
+    FLAC_FILE=`grep 'FILE' "$NEW_CUE_FILE" | grep -e '\([^"]*\.[^"]*\)' -o`
+fi
+if [ ! -r "$FLAC_FILE" ]; then
+  usage
+  exit 1
+fi
+
+
+METAFLAC="metaflac --no-utf8-convert --remove-all-tags"
+
+COVERS="Cover.jpg cover.jpg Folder.jpg folder.jpg Front.jpg Covers/Front.jpg Covers/Front00.jpg Covers/Front01.jpg"
+COVER="$TMPDIR/Cover.jpg"
+for cover in $COVERS; do
+  if [ -r $cover ]; then
+  	convert "$cover" -auto-orient -background transparent -gravity center -format JPG -resize '500x500>' "$COVER"
+    METAFLAC=$METAFLAC" --import-picture-from="$COVER;
+    break;
+  fi
+done
+
+METAFLAC=$METAFLAC" --import-tags-from=-"
+
+shnsplit -O always -q -f "$NEW_CUE_FILE" -t "%n - %t" -o flac "$FLAC_FILE"
+
+
+fields='TITLE VERSION ALBUM TRACKNUMBER TRACKTOTAL ARTIST COPYRIGHT LICENSE ORGANIZATION DESCRIPTION GENRE DATE LOCATION CONTACT ISRC'
+
+DATE=`grep "REM DATE" "$NEW_CUE_FILE" | sed -e 's/REM DATE \([0-9]*\).*/\1/g'`
+GEN=`cueprint -t "%G" "$NEW_CUE_FILE"`
+if [ -z "$GEN"]; then
+	GEN=`grep "REM GENRE" "$NEW_CUE_FILE" | sed -e 's/REM GENRE \([[:print:]]*\).*/\1/g' | sed -e 's/^"\(.*\)"$/\1/g'`
+fi
+
+PERF=`cueprint -t "%P" -n 1 "$NEW_CUE_FILE"`
+if [ -z "$PERF" ]; then
+	PERF=`cueprint -t "%P" "$NEW_CUE_FILE"`	
+fi
+
+cueconvert -i cue -o cue "$NEW_CUE_FILE" "$NEW_CUE_FILE"
+
+NUMBER=`cueprint -d "%N" "$NEW_CUE_FILE"`
+
+for((I=1;I<=NUMBER;I++));
+do
+	CONV_FILE=`printf "%02d - " $I``cueprint -n $I -t '%t' "$NEW_CUE_FILE"`".flac"
+	CONV_FILE=`echo "$CONV_FILE" | sed -r 's/\.\.flac/\.flac/g' | sed -r 's/\//-/g'`
+
+	TITLE='%t'
+	VERSION=''
+	ALBUM='%T'
+	TRACKNUMBER='%n'
+	TRACKTOTAL='%N'
+	ARTIST='%p'
+	GENRE='%g'
+	COPYRIGHT=''
+	LICENSE=''
+	ORGANIZATION=''
+	DESCRIPTION='%m'
+	LOCATION=''
+	CONTACT=''
+	ISRC='%i %u'
+	(for field in $fields; do
+		value=""
+		for conv in `eval echo \\$$field`; do
+			value=`cueprint -n $I -t "$conv\n" "$NEW_CUE_FILE"`
+			if [ -n "$value" ]; then
+				echo "$field=$value"
+				break
+			elif [ $field = 'GENRE' -a -n "$GEN" ]; then
+			  	echo $field"="$GEN
+			  	break
+			elif [ $field = 'DATE' -a -n "$DATE" ]; then
+				echo $field"="$DATE
+				break
+			elif [ $field = 'ARTIST' -a -n "$PERF" ]; then
+				echo $field"="$PERF
+				break
+			fi
+		done
+	done) | $METAFLAC "$CONV_FILE"
+	CONV_FILE_N=`echo "$CONV_FILE" | sed -r 's/[?<>\\:*|\"]/_/g'`
+	if [ "$CONV_FILE" != "$CONV_FILE_N" ]; then
+		mv -f "$CONV_FILE" "$CONV_FILE_N"
+	fi
+done
+if [ -r $COVER ]; then
+	rm "$COVER"
+fi
+rm -f "$NEW_CUE_FILE"
+exit 0
