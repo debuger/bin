@@ -1,0 +1,29 @@
+#!/bin/sh
+
+#
+# https://trac.ffmpeg.org/wiki/Hardware/QuickSync
+#
+
+usage()
+{
+  echo "usage: toh265 <source>"
+}
+  
+if [ $# -lt 1 ]; then
+  usage
+  exit 1
+fi
+
+SOURCE_FILE=$1
+if [ ! -f "$SOURCE_FILE" ]; then
+  usage
+  exit 1
+fi
+DESTINATION="${SOURCE_FILE%.*}".hevc.mkv
+if [ "$DESTINATION" = "$SOURCE_FILE" ]
+then
+ echo "please rename source file"
+ exit
+fi;
+
+ffmpeg -hwaccel_output_format qsv -qsv_device /dev/dri/renderD128 -i "$SOURCE_FILE" -pix_fmt p010le -x265-params lossless=1:profile=main10 -preset slow -tune film -c:a copy -b:v 5M -maxrate 5M -c:v hevc_qsv -profile:v main10 "$DESTINATION"
